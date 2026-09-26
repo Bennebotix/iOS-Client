@@ -5,7 +5,6 @@ use crate::app::input::InputState;
 use crate::entity::HURT_DURATION;
 use crate::entity::components::{LookDirection, Position};
 
-const UP: Vec3 = Vec3::Y;
 pub const DEFAULT_FOV_DEGREES: f32 = 70.0;
 #[allow(dead_code)]
 pub const MIN_FOV_DEGREES: f32 = 30.0;
@@ -256,11 +255,10 @@ impl Camera {
     }
 
     /// Vanilla `Entity.turn`: add the already-scaled deltas, clamping pitch
-    /// (in `LookDirection::new`). Pomme additionally wraps yaw into
-    /// (-180, 180].
+    /// (in `LookDirection::new`). Yaw accumulates unwrapped; wrapping it would
+    /// send a fake ~360° rotation delta.
     fn turn(&mut self, y_rot_delta: f32, x_rot_delta: f32) {
-        let y_rot_deg =
-            ((self.look_dir.y_rot_deg() + y_rot_delta) + 180.0).rem_euclid(360.0) - 180.0;
+        let y_rot_deg = self.look_dir.y_rot_deg() + y_rot_delta;
         let x_rot_deg = self.look_dir.x_rot_deg() + x_rot_delta;
         self.look_dir = LookDirection::new(y_rot_deg, x_rot_deg);
     }
@@ -437,7 +435,10 @@ impl Camera {
         } else {
             look_dir
         };
-        (forward, UP)
+        // World up is collinear with `forward` at ±90° pitch; the billboard
+        // up axis stays defined there.
+        let (_, up) = self.billboard_axes();
+        (forward, up)
     }
 
     pub fn top_down(&self) -> Option<f32> {
@@ -659,6 +660,20 @@ mod tests {
             Mat4::IDENTITY,
             "expired hurt timing must not rotate the camera",
         );
+    }
+
+    #[test]
+    fn view_basis_stays_finite_and_upright_at_pitch_limits() {
+        let mut camera = Camera::new(16.0 / 9.0);
+        for pitch in [-90.0, 90.0] {
+            camera.look_dir = LookDirection::new(37.0, pitch);
+            let (forward, up) = camera.view_basis();
+            assert!(forward.is_finite() && up.is_finite());
+            assert!((forward.length() - 1.0).abs() < 1e-6);
+            assert!((up.length() - 1.0).abs() < 1e-6);
+            assert!(forward.dot(up).abs() < 1e-6);
+            assert!(camera.view_projection().is_finite());
+        }
     }
 
     #[test]

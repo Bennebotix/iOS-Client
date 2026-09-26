@@ -353,8 +353,10 @@ impl InteractionState {
         self.target = block_hit.map(HitResult::Block);
     }
 
+    /// Vanilla `MultiPlayerGameMode.tick` + `Minecraft.handleKeybinds`; runs
+    /// before the entity tick, so its packets precede the movement packet.
     #[allow(clippy::too_many_arguments)]
-    pub fn tick(
+    pub fn tick_actions(
         &mut self,
         input: &InputState,
         chunks: &ChunkStore,
@@ -375,21 +377,15 @@ impl InteractionState {
     ) -> Vec<BlockPos> {
         let mut dirty_chunks = Vec::new();
 
+        // Vanilla `Minecraft.tick`: `rightClickDelay` first, then
+        // `gameMode.tick` syncs the carried slot.
+        if self.use_delay > 0 {
+            self.use_delay -= 1;
+        }
         self.ensure_has_sent_carried_item(sender, selected_slot);
 
-        // Vanilla `Minecraft.tick` order: attack/use input (which triggers the
-        // swing) runs first, then `--missTime`, then the player entity advances
-        // `updateSwingTime` and `updatingUsingItem`. Running `update_swing`
-        // last keeps the swing animation cadence in lockstep with vanilla.
         if !input.is_cursor_captured() {
             self.stop_destroying(sender);
-            // No screen-open release in vanilla either: an in-flight use keeps
-            // ticking (and completing) while a menu is up.
-            self.update_using_item(
-                held_stack, sender, audio, chunks, player_pos, eye_pos, look, effects,
-            );
-            self.tick_attack_cooldown(held_stack);
-            self.update_swing();
             return dirty_chunks;
         }
 
@@ -479,19 +475,18 @@ impl InteractionState {
             let _ = input.strong_rumble_for_tick();
         }
 
-        if self.miss_time > 0 {
+        dirty_chunks
+    }
+
+    /// Post-movement player state: `Player.aiStep` swings after
+    /// `super.aiStep`, still ahead of LocalPlayer's input/movement packets.
+    pub fn tick_player_state(&mut self, cursor_captured: bool, held_stack: Option<&ItemStackData>) {
+        // TODO: vanilla sets missTime = 10000 while a screen is open.
+        if cursor_captured && self.miss_time > 0 {
             self.miss_time -= 1;
         }
-        if self.use_delay > 0 {
-            self.use_delay -= 1;
-        }
-        self.update_using_item(
-            held_stack, sender, audio, chunks, player_pos, eye_pos, look, effects,
-        );
         self.tick_attack_cooldown(held_stack);
         self.update_swing();
-
-        dirty_chunks
     }
 
     fn pick_block_or_entity(&self, sender: &PacketSender, include_data: bool) {
@@ -868,11 +863,11 @@ impl InteractionState {
         }
     }
 
-    /// Dead-player `LivingEntity.tick` heartbeat that still runs before the
-    /// removed check around `aiStep`. This deliberately excludes keybind and
-    /// block-interaction handling: only an already-active item use advances.
+    /// `LivingEntity.tick` → `updatingUsingItem`, which runs before `aiStep`
+    /// (so before movement), dead or alive: only an already-active use
+    /// advances.
     #[allow(clippy::too_many_arguments)]
-    pub fn tick_dead_living_state(
+    pub fn tick_using_item(
         &mut self,
         held_stack: Option<&ItemStackData>,
         sender: &PacketSender,
@@ -1240,7 +1235,7 @@ impl InteractionState {
     /// Ports vanilla `MultiPlayerGameMode.ensureHasSentCarriedItem`: tell the
     /// server which hotbar slot is selected whenever it changes, so it resolves
     /// interactions against the item we're actually holding.
-    fn ensure_has_sent_carried_item(&mut self, sender: &PacketSender, selected_slot: u8) {
+    pub fn ensure_has_sent_carried_item(&mut self, sender: &PacketSender, selected_slot: u8) {
         if selected_slot != self.carried_slot {
             self.carried_slot = selected_slot;
             sender.send(ServerboundGamePacket::SetCarriedItem(
@@ -1765,6 +1760,27 @@ mod tests {
     use glam::dvec3;
 
     use super::*;
+
+    #[test]
+    fn carried_slot_starts_at_vanilla_zero_and_only_sends_on_change() {
+        use crate::net::sender::Outbound;
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let sender = PacketSender::new(tx);
+        let mut state = InteractionState::new();
+
+        state.ensure_has_sent_carried_item(&sender, 0);
+        assert!(rx.try_recv().is_err());
+
+        state.ensure_has_sent_carried_item(&sender, 5);
+        let Outbound::Packet(packet) = rx.try_recv().expect("slot change packet") else {
+            panic!("expected structured packet");
+        };
+        let ServerboundGamePacket::SetCarriedItem(packet) = *packet else {
+            panic!("expected SetCarriedItem");
+        };
+        assert_eq!(packet.slot, 5);
+    }
 
     #[test]
     fn respawn_resets_player_owned_interaction_transients() {
