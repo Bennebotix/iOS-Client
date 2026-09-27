@@ -158,9 +158,7 @@ pub enum FluidKind {
 pub struct Fluid {
     pub kind: FluidKind,
     pub amount: u8,
-    /// Not consumed yet; kept for vanilla parity (falling columns behave as
-    /// full sources in flow/height logic).
-    #[allow(dead_code)]
+    /// Falling fluid; pulls entities down beside sturdy faces.
     pub falling: bool,
 }
 
@@ -566,6 +564,7 @@ fn build_table(data: &EmbeddedBlocks) -> Vec<BlockData> {
             "scaffolding" => SpecialCollision::Scaffolding,
             "powder_snow" => SpecialCollision::PowderSnow,
             "moving_piston" => SpecialCollision::MovingPiston,
+            name if name.ends_with("shulker_box") => SpecialCollision::ShulkerBox,
             _ => SpecialCollision::None,
         };
 
@@ -648,11 +647,15 @@ fn build_table(data: &EmbeddedBlocks) -> Vec<BlockData> {
                 legacy_solid: flag(&state_entry.l),
                 replaceable: flag(&state_entry.v),
                 full_face_sturdy: state_entry.t.as_ref().map(|t| t.get(i)),
-                large_collision_shape: shape.is_some_and(|boxes| {
-                    boxes
-                        .iter()
-                        .any(|b| b[..3].iter().any(|&v| v < 0.0) || b[3..].iter().any(|&v| v > 1.0))
-                }),
+                // Dynamic-shape blocks have no shape cache, which vanilla
+                // reports as large.
+                // TODO: dump `hasDynamicShape` for the other dynamic blocks.
+                large_collision_shape: special_collision == SpecialCollision::ShulkerBox
+                    || shape.is_some_and(|boxes| {
+                        boxes.iter().any(|b| {
+                            b[..3].iter().any(|&v| v < 0.0) || b[3..].iter().any(|&v| v > 1.0)
+                        })
+                    }),
                 collision_shape_uses_offset,
                 outline_shape_uses_offset,
                 position_offset,
@@ -841,6 +844,34 @@ pub fn block_behavior(state: BlockState) -> &'static BlockBehavior {
     &block_data(state).behavior
 }
 
+/// Vanilla `BlockBehaviour` movement friction.
+// TODO: read friction, speed and jump factors from the generated state table.
+pub fn movement_friction(state: BlockState) -> f32 {
+    match block_id(state) {
+        "ice" | "packed_ice" | "frosted_ice" => 0.98,
+        "blue_ice" => 0.989,
+        "slime_block" => 0.8,
+        _ => 0.6,
+    }
+}
+
+/// Vanilla `BlockBehaviour.speedFactor`.
+pub fn movement_speed_factor(state: BlockState) -> f32 {
+    match block_id(state) {
+        "soul_sand" | "honey_block" => 0.4,
+        _ => 1.0,
+    }
+}
+
+/// Vanilla `BlockBehaviour.jumpFactor`.
+pub fn movement_jump_factor(state: BlockState) -> f32 {
+    if block_id(state) == "honey_block" {
+        0.5
+    } else {
+        1.0
+    }
+}
+
 /// Vanilla `RedStoneWireBlock.getColorForPower`: dust tint for the state's
 /// `power` value.
 pub fn redstone_wire_rgb(state: BlockState) -> [f32; 3] {
@@ -878,16 +909,19 @@ pub(crate) enum SpecialCollision {
     Scaffolding,
     PowderSnow,
     MovingPiston,
+    ShulkerBox,
 }
 
 pub(crate) fn special_collision(state: BlockState) -> SpecialCollision {
     block_data(state).special_collision
 }
 
-/// Vanilla `BlockState.blocksMotion()`, distinct from collision and occlusion.
-#[allow(dead_code)]
-pub fn blocks_motion(state: BlockState) -> Option<bool> {
-    block_data(state).blocks_motion
+/// Vanilla `BlockState.blocksMotion()`, distinct from collision and occlusion;
+/// collision stands in where the table lacks it.
+pub fn blocks_motion(state: BlockState) -> bool {
+    block_data(state)
+        .blocks_motion
+        .unwrap_or_else(|| has_collision(state))
 }
 
 /// Vanilla cached `BlockState.isSolid()` / `legacySolid`.
@@ -904,7 +938,6 @@ pub fn is_replaceable(state: BlockState) -> Option<bool> {
 }
 
 /// Vanilla `BlockState.isFaceSturdy(..., SupportType.FULL)`.
-#[allow(dead_code)]
 pub fn is_full_face_sturdy(state: BlockState, direction: model::Direction) -> Option<bool> {
     block_data(state)
         .full_face_sturdy
@@ -1168,16 +1201,25 @@ mod tests {
     }
 
     #[test]
+    fn movement_block_properties_match_vanilla_26_2_overrides() {
+        setup();
+        assert_eq!(movement_friction(find_state("stone", &[])), 0.6);
+        assert_eq!(movement_friction(find_state("ice", &[])), 0.98);
+        assert_eq!(movement_friction(find_state("blue_ice", &[])), 0.989);
+        assert_eq!(movement_friction(find_state("slime_block", &[])), 0.8);
+        assert_eq!(movement_speed_factor(find_state("soul_sand", &[])), 0.4);
+        assert_eq!(movement_speed_factor(find_state("honey_block", &[])), 0.4);
+        assert_eq!(movement_jump_factor(find_state("honey_block", &[])), 0.5);
+        assert_eq!(movement_jump_factor(find_state("stone", &[])), 1.0);
+    }
+
+    #[test]
     fn legacy_solid_is_distinct_from_blocks_motion_for_vanilla_exceptions() {
         setup();
         for name in ["cobweb", "bamboo_sapling"] {
             let state = find_state(name, &[]);
             assert_eq!(is_solid(state), Some(true), "{name} is legacy-solid");
-            assert_eq!(
-                blocks_motion(state),
-                Some(false),
-                "{name} doesn't block motion"
-            );
+            assert!(!blocks_motion(state), "{name} doesn't block motion");
         }
     }
 

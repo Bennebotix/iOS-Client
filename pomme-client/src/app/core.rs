@@ -2257,12 +2257,6 @@ impl AppCore {
                         .set_item_data(id, item_name, item_id, damage, count);
                 }
                 NetworkEvent::EntityData { id, index, value } => {
-                    if id == game.player.entity_id
-                        && index == 8
-                        && let crate::entity::MetaValue::Byte(flags) = value
-                    {
-                        game.interaction.sync_using_item_flag(flags & 1 != 0);
-                    }
                     if index == 4
                         && let crate::entity::MetaValue::Bool(silent) = &value
                     {
@@ -2271,6 +2265,15 @@ impl AppCore {
                             self.audio.stop_entity_sounds(id);
                         } else {
                             game.silent_entities.remove(&id);
+                        }
+                    }
+                    if id == game.player.entity_id
+                        && let crate::entity::MetaValue::Byte(flags) = value
+                    {
+                        match index {
+                            0 => game.player.sync_shared_flags(flags),
+                            8 => game.interaction.sync_using_item_flag(flags & 1 != 0),
+                            _ => {}
                         }
                     }
                     game.entity_store.apply_entity_data(id, index, value);
@@ -2775,7 +2778,12 @@ impl AppCore {
             // LocalPlayer.tick still executes its post-super player state and
             // input/position packet tail once.
             if !removed_this_tick {
-                movement::tick_dead(&mut game.player, &game.chunk_store);
+                movement::tick_dead(
+                    &mut game.player,
+                    &game.chunk_store,
+                    &game.block_entity_anim,
+                    game.riding_vehicle_id.is_some(),
+                );
                 crate::entity::stop_walk_animation(
                     &mut game.player_walk_pos,
                     &mut game.player_walk_speed,
@@ -2966,12 +2974,17 @@ impl AppCore {
         if game.chunk_load_bench.is_some() {
             game.player.velocity = crate::entity::components::Velocity::new(0.0, 0.0, 0.0);
         }
+        let vehicle = game.riding_vehicle_id.map(|_| movement::Vehicle {
+            jumpable: game.riding_jumpable_vehicle(),
+        });
         movement::tick(
             &mut game.player,
             input,
             &game.chunk_store,
+            &game.block_entity_anim,
             game.interaction.use_speed_multiplier(),
             game.interaction.slow_due_to_using_item(),
+            vehicle,
         );
         let dx = game.player.position.x - game.player.prev_position.x;
         let dz = game.player.position.z - game.player.prev_position.z;

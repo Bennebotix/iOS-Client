@@ -28,6 +28,9 @@ const FULL_CUBE_SHAPE: &[LocalBox] = &[[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]];
 /// `ScaffoldingBlock.SHAPE_UNSTABLE_BOTTOM`.
 const SCAFFOLDING_UNSTABLE_BOTTOM: &[LocalBox] = &[[0.0, 0.0, 0.0, 1.0, 2.0 / 16.0, 1.0]];
 
+/// `PowderSnowBlock.FALLING_COLLISION_SHAPE`.
+const POWDER_SNOW_FALLING: &[LocalBox] = &[[0.0, 0.0, 0.0, 1.0, 0.9_f32 as f64, 1.0]];
+
 /// Vanilla `EntityCollisionContext`, reduced to what block shapes read.
 #[derive(Clone, Copy, Debug)]
 pub struct CollisionContext {
@@ -35,6 +38,7 @@ pub struct CollisionContext {
     entity_bottom: Option<f64>,
     descending: bool,
     walks_on_powder_snow: bool,
+    fall_distance: f64,
 }
 
 impl CollisionContext {
@@ -43,6 +47,7 @@ impl CollisionContext {
         entity_bottom: None,
         descending: false,
         walks_on_powder_snow: false,
+        fall_distance: 0.0,
     };
 
     /// `CollisionContext.of(entity)`: `descending` is `isDescending` (the
@@ -53,6 +58,15 @@ impl CollisionContext {
             entity_bottom: Some(bottom),
             descending,
             walks_on_powder_snow,
+            fall_distance: 0.0,
+        }
+    }
+
+    /// The entity's `fallDistance`, which powder snow reads.
+    pub fn with_fall_distance(self, fall_distance: f64) -> Self {
+        Self {
+            fall_distance,
+            ..self
         }
     }
 
@@ -94,14 +108,20 @@ pub fn collision_shape(
             }
         }
         // `PowderSnowBlock.getCollisionShape`.
-        // TODO: the `fallDistance > 2.5` shape once fall distance is tracked.
         SpecialCollision::PowderSnow => {
+            if ctx.fall_distance > 2.5 {
+                return Some(POWDER_SNOW_FALLING);
+            }
             let walkable =
                 ctx.walks_on_powder_snow && ctx.is_above(1.0, pos_y, false) && !ctx.descending;
             if walkable { None } else { Some(&[]) }
         }
-        _ if !has_collision(state) => Some(&[]),
-        _ => partial_shape(state),
+        // Explicit shapes beat `noCollision` (`PitcherCropBlock`,
+        // `WallHangingSignBlock`); only the full-cube default needs the flag.
+        _ => match partial_shape(state) {
+            None if !has_collision(state) => Some(&[]),
+            shape => shape,
+        },
     }
 }
 
