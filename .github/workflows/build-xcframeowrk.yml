@@ -32,7 +32,7 @@ jobs:
 
       - name: Build Rust Static Library (iOS Target)
         run: |
-          cargo build --package pomme-client --target aarch64-apple-ios --no-default-features --release
+          cargo build --lib --package pomme-client --target aarch64-apple-ios --no-default-features --release
 
       - name: Create cbindgen Configuration
         run: |
