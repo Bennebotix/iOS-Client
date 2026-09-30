@@ -5,14 +5,13 @@ members = [
     "pomme-gpu-allocator",
     "pomme-block",
     "pomme-protocol",
+    "pomme-singleplayer",
     "tools/blockgen",
     "tools/protogen"
 ]
-# Desktop-only crates excluded from iOS build workspace
-# "pomme-singleplayer", "pomme-launcher/src-tauri"
+# Exclude third_party and desktop-only Tauri launcher
 exclude = [
     "third_party/SteelMC",
-    "pomme-singleplayer",
     "pomme-launcher/src-tauri"
 ]
 
@@ -62,6 +61,17 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# Mirrors steel's dev overrides
+[profile.dev.package.steel-worldgen]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.steel-math]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
 
 [profile.release]
 opt-level = 3
