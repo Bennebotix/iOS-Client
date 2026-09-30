@@ -1,0 +1,72 @@
+name: Build Pomme Core XCFramework
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-xcframework:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+
+      - name: Install cbindgen
+        run: cargo install cbindgen
+
+      - name: Build Rust Static Library (iOS Device)
+        run: |
+          cargo build --package pomme-client --target aarch64-apple-ios --release
+
+      - name: Generate C Header
+        run: |
+          cbindgen --config cbindgen.toml --crate pomme-client --output pomme.h
+
+      - name: Prepare Module Map
+        run: |
+          mkdir -p Headers
+          cp pomme.h Headers/
+          cat << 'EOF' > Headers/module.modulemap
+          module PommeCore {
+              header "pomme.h"
+              export *
+          }
+          EOF
+
+      - name: Assemble XCFramework
+        run: |
+          mkdir -p build
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libpomme_client.a \
+            -headers Headers \
+            -output build/PommeCore.xcframework
+
+      - name: Compress XCFramework
+        run: |
+          cd build
+          zip -r ../PommeCore.xcframework.zip PommeCore.xcframework
+          cd ..
+          echo "FRAMEWORK_SHA=$(shasum -a 256 PommeCore.xcframework.zip | awk '{ print $1 }')" >> $GITHUB_ENV
+
+      - name: Display Release Info
+        run: |
+          echo "SHA256 Checksum for Swift Package Manager:"
+          echo "${{ env.FRAMEWORK_SHA }}"
+
+      - name: Upload Release Artifact
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: PommeCore.xcframework.zip
+          body: |
+            Pomme Core XCFramework Build
+            
+            **SPM binaryTarget checksum:**
+            `${{ env.FRAMEWORK_SHA }}`
