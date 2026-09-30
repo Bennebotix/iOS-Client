@@ -8,10 +8,12 @@ on:
 
 jobs:
   build-xcframework:
-    runs-on: macos-latest
+    runs-on: xcode-27
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -20,6 +22,14 @@ jobs:
 
       - name: Install cbindgen
         run: cargo install cbindgen
+
+      - name: Generate cbindgen.toml
+        run: |
+          echo 'language = "C"' > cbindgen.toml
+          echo 'include_guard = "POMME_CORE_H"' >> cbindgen.toml
+
+      - name: Install Build Dependencies for shaderc
+        run: brew install cmake ninja
 
       - name: Build Rust Static Library (iOS Device)
         run: |
