@@ -72,10 +72,12 @@ image = "0.25"
 fontdue = "0.9.3"
 freetype-rs = { version = "0.38", optional = true }
 simdnbt = "0.10"
-discord-rich-presence = "1.1"
-arboard = { version = "3", features = ["wayland-data-control"] }
 scopeguard = "1.2"
 libloading = "0.9"
 symphonia = { version = "0.5.5", default-features = false, features = ["ogg", "vorbis"] }
 fastrand = "2"
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+discord-rich-presence = "1.1"
+arboard = { version = "3", features = ["wayland-data-control"] }
 gilrs = "0.11.2"
