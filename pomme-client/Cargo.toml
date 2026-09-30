@@ -11,9 +11,7 @@ crate-type = ["staticlib", "rlib"]
 
 [features]
 default = []
-# Embeds SteelMC as the integrated server.
 singleplayer = ["dep:pomme-singleplayer"]
-# Loads `ttf` font providers from resource packs through system FreeType.
 ttf-fonts = ["dep:freetype-rs"]
 
 [build-dependencies]
