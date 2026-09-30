@@ -5,6 +5,8 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 
 [lib]
+name = "pomme_client"
+path = "src/lib.rs"
 crate-type = ["staticlib", "rlib"]
 
 [features]
