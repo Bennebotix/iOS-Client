@@ -23,7 +23,7 @@ jobs:
 
       - name: Build Rust Static Library (iOS Device)
         run: |
-          cargo build --package pomme-client --target aarch64-apple-ios --release
+          cargo build --package pomme-client --target aarch64-apple-ios --no-default-features --release
 
       - name: Generate C Header
         run: |
