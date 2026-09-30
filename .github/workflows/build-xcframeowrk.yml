@@ -18,10 +18,14 @@ jobs:
       - name: Install System Dependencies for shaderc
         run: brew install cmake ninja pkg-config
 
-      - name: Install Rust Toolchain
+      - name: Install Rust Toolchain & Target
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
+          override: true
+
+      - name: Ensure Target is Registered
+        run: rustup target add aarch64-apple-ios
 
       - name: Install cbindgen
         run: cargo install cbindgen
