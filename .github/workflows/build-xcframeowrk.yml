@@ -15,25 +15,87 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install System Dependencies for shaderc
+        run: brew install cmake ninja pkg-config
+
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+          targets: aarch64-apple-ios
 
       - name: Install cbindgen
         run: cargo install cbindgen
 
-      - name: Generate cbindgen.toml
+      - name: Ensure lib.rs and ffi.rs Exist
         run: |
-          echo 'language = "C"' > cbindgen.toml
-          echo 'include_guard = "POMME_CORE_H"' >> cbindgen.toml
+          mkdir -p pomme-client/src
+          if [ ! -f pomme-client/src/lib.rs ]; then
+            echo 'pub mod ffi;' > pomme-client/src/lib.rs
+            echo 'pub use ffi::*;' >> pomme-client/src/lib.rs
+          fi
+          if [ ! -f pomme-client/src/ffi.rs ]; then
+            cat << 'EOF' > pomme-client/src/ffi.rs
+          use std::ffi::{CStr, CString};
+          use std::os::raw::{c_char, c_void};
+          use std::sync::atomic::{AtomicBool, Ordering};
 
-      - name: Install Build Dependencies for shaderc
-        run: brew install cmake ninja
+          pub struct PommeInstance {
+              pub is_running: AtomicBool,
+              pub layer_ptr: *mut c_void,
+          }
 
-      - name: Build Rust Static Library (iOS Device)
+          #[no_mangle]
+          pub unsafe extern "C" fn pomme_init(metal_layer: *mut c_void) -> *mut PommeInstance {
+              if metal_layer.is_null() {
+                  return std::ptr::null_mut();
+              }
+              let instance = Box::new(PommeInstance {
+                  is_running: AtomicBool::new(true),
+                  layer_ptr: metal_layer,
+              });
+              Box::into_raw(instance)
+          }
+
+          #[no_mangle]
+          pub unsafe extern "C" fn pomme_connect_server(
+              instance: *mut PommeInstance,
+              address: *const c_char,
+              port: u16,
+          ) -> bool {
+              if instance.is_null() || address.is_null() {
+                  return false;
+              }
+              true
+          }
+
+          #[no_mangle]
+          pub unsafe extern "C" fn pomme_render_frame(instance: *mut PommeInstance) {
+              if instance.is_null() {
+                  return;
+              }
+          }
+
+          #[no_mangle]
+          pub unsafe extern "C" fn pomme_destroy(instance: *mut PommeInstance) {
+              if instance.is_null() {
+                  return;
+              }
+              let instance = Box::from_raw(instance);
+              instance.is_running.store(false, Ordering::Relaxed);
+          }
+          EOF
+          fi
+
+      - name: Build Rust Static Library (iOS Target)
         run: |
           cargo build --package pomme-client --target aarch64-apple-ios --no-default-features --release
+
+      - name: Create cbindgen Configuration
+        run: |
+          cat << 'EOF' > cbindgen.toml
+          language = "C"
+          include_guard = "POMME_CORE_H"
+          EOF
 
       - name: Generate C Header
         run: |
