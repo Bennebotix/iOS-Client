@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-xcframework:
-    runs-on: xcode-27
+    runs-on: macos-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -48,8 +48,9 @@ jobs:
         run: |
           cbindgen --config cbindgen.toml --crate pomme-client --output pomme.h
 
-      - name: Prepare Module Map
+      - name: Prepare Headers & Module Map
         run: |
+          rm -rf Headers
           mkdir -p Headers
           cp pomme.h Headers/
           cat << 'EOF' > Headers/module.modulemap
@@ -61,6 +62,7 @@ jobs:
 
       - name: Assemble XCFramework
         run: |
+          rm -rf build
           mkdir -p build
           xcodebuild -create-xcframework \
             -library target/aarch64-apple-ios/release/libpomme_client.a \
